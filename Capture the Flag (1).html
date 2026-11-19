@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Capture the Flag</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);--bg:#fff;--fg:#14181f;--card:#f1f3f6;--mut:#667;--acc:#e5322d}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1218;--fg:#f2f4f8;--card:#1b212b;--mut:#9aa4b5;--acc:#ff5a52}}
+*{box-sizing:border-box}html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--fg);font:17px/1.4 system-ui,-apple-system,sans-serif}
+.s{display:none;min-height:100%;padding:28px 24px;max-width:440px;margin:0 auto;flex-direction:column;justify-content:center;text-align:center;gap:14px}
+.s.on{display:flex}
+.logo{font-size:72px}h1{margin:0;font-size:30px}p{margin:0;color:var(--mut)}
+button{width:100%;padding:18px;border:0;border-radius:16px;background:var(--acc);color:#fff;font:600 18px system-ui}
+button.g{background:var(--card);color:var(--fg)}
+.chips{display:flex;gap:8px}.chips button{padding:14px 0;background:var(--card);color:var(--fg);font-size:16px}.chips button.on{background:var(--acc);color:#fff}
+textarea{width:100%;padding:16px;border-radius:16px;border:0;background:var(--card);color:var(--fg);font:15px monospace;text-align:center;resize:none}
+.code{word-break:break-all;font:14px monospace;background:var(--card);padding:16px;border-radius:16px;color:var(--fg)}
+.err{color:var(--acc);font-size:15px;min-height:20px}
+.back{background:none;color:var(--mut);padding:8px;font-size:16px;font-weight:500}
+#play{position:fixed;inset:0;background:#000;display:none;z-index:5;overflow:hidden}
+video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.hud{position:absolute;left:0;right:0;top:0;padding:calc(env(safe-area-inset-top,0px) + 14px) 18px 30px;color:#fff;text-align:center;background:linear-gradient(#000b,#0000);text-shadow:0 1px 4px #000}
+#dist{font-size:52px;font-weight:700}#hint{font-size:18px}
+#x{position:absolute;right:12px;top:calc(env(safe-area-inset-top,0px) + 12px);width:40px;height:40px;padding:0;border-radius:50%;background:#0008;font-size:18px}
+#flag{position:absolute;top:50%;transform:translate(-50%,-50%);display:none;filter:drop-shadow(0 4px 8px #000)}
+#edge{position:absolute;top:50%;font-size:60px;display:none;text-shadow:0 2px 6px #000;transform:translateY(-50%)}
+#win{display:none;position:absolute;inset:0;background:#000e;color:#fff;z-index:9;flex-direction:column;justify-content:center;align-items:center;gap:14px;padding:30px;text-align:center}
+#win button{max-width:320px}
+</style></head><body>
+
+<div class="s on" id="home">
+  <div class="logo">🚩</div><h1>Capture the Flag</h1><p>Find a hidden flag in real life with your camera.</p>
+  <button onclick="show('hide')">Hide a flag</button>
+  <button class="g" onclick="show('join')">Join a game</button>
+</div>
+
+<div class="s" id="hide">
+  <h1>How big is the area?</h1><p>Stand in the middle of where you want to play.</p>
+  <div class="chips" id="chips"><button data-r="50">50 m</button><button data-r="100" class="on">100 m</button><button data-r="250">250 m</button></div>
+  <button onclick="hideFlag()" id="hb">Hide the flag here</button>
+  <div class="err" id="e1"></div>
+  <button class="back" onclick="show('home')">Back</button>
+</div>
+
+<div class="s" id="share">
+  <div class="logo">✅</div><h1>Flag hidden!</h1><p>Send this code to your friends.</p>
+  <div class="code" id="codeBox"></div>
+  <button onclick="shareCode()" id="sb">Share code</button>
+  <button class="g" onclick="join(code)">Start playing</button>
+</div>
+
+<div class="s" id="join">
+  <h1>Join a game</h1><p>Paste the code your friend sent.</p>
+  <textarea id="inp" rows="3" placeholder="Paste code"></textarea>
+  <button onclick="join(inp.value)">Find the flag</button>
+  <div class="err" id="e2"></div>
+  <button class="back" onclick="show('home')">Back</button>
+</div>
+
+<div id="play">
+  <video id="vid" autoplay playsinline muted></video>
+  <div class="hud"><div id="dist">…</div><div id="hint">Finding you…</div></div>
+  <button id="x" onclick="quit()">✕</button>
+  <div id="flag">🚩</div><div id="edge"></div>
+  <div id="win"><div style="font-size:80px">🏆</div><h1>You got it!</h1><p id="wt" style="font-size:20px"></p><p>Screenshot this to brag.</p><button onclick="quit()">Done</button></div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id),R=6371000,rad=x=>x*Math.PI/180,deg=x=>x*180/Math.PI;
+let code='',game,watch,pos,heading,t0,stream,won,radius=100;
+function show(id){document.querySelectorAll('.s').forEach(s=>s.classList.toggle('on',s.id===id))}
+$('chips').onclick=e=>{const b=e.target.closest('button');if(!b)return;radius=+b.dataset.r;[...$('chips').children].forEach(c=>c.classList.toggle('on',c===b))};
+function prng(s){return()=>{s|=0;s=s+0x6D2B79F5|0;let t=Math.imul(s^s>>>15,1|s);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function flagPos(g){const r=prng(g.s),a=r()*6.2832,d=g.r*Math.sqrt(r());return{lat:g.la+deg(d*Math.cos(a)/R),lng:g.lo+deg(d*Math.sin(a)/(R*Math.cos(rad(g.la))))}}
+function dist(a,b,c,d){return Math.hypot(rad(d-b)*Math.cos(rad((a+c)/2)),rad(c-a))*R}
+function bearing(a,b,c,d){const y=Math.sin(rad(d-b))*Math.cos(rad(c)),x=Math.cos(rad(a))*Math.sin(rad(c))-Math.sin(rad(a))*Math.cos(rad(c))*Math.cos(rad(d-b));return(deg(Math.atan2(y,x))+360)%360}
+function locMsg(e){return e.code===1?'Location is blocked. Open this page in Safari/Chrome and allow location.':e.code===3?'Taking too long. Step outside and try again.':'Can’t get your location. Turn on Location Services.'}
+
+function hideFlag(){
+  if(!navigator.geolocation)return $('e1').textContent='Location isn’t supported here.';
+  $('e1').textContent='';$('hb').textContent='Locating…';
+  const done=p=>{$('hb').textContent='Hide the flag here';
+    code=btoa(JSON.stringify({la:+p.coords.latitude.toFixed(6),lo:+p.coords.longitude.toFixed(6),r:radius,s:Math.floor(Math.random()*1e9)}));
+    $('codeBox').textContent=code;show('share')};
+  const fail=e=>{$('hb').textContent='Hide the flag here';$('e1').textContent=locMsg(e)};
+  navigator.geolocation.getCurrentPosition(done,e=>e.code===1?fail(e):navigator.geolocation.getCurrentPosition(done,fail,{timeout:20000,maximumAge:60000}),{enableHighAccuracy:true,timeout:10000});
+}
+async function shareCode(){
+  const t='Join my Capture the Flag game! Open '+location.href.split('#')[0]+' → Join a game → paste this code:\n\n'+code;
+  try{if(navigator.share){await navigator.share({text:t});return}await navigator.clipboard.writeText(code);$('sb').textContent='Copied ✓'}
+  catch(e){try{await navigator.clipboard.writeText(code);$('sb').textContent='Copied ✓'}catch(_){}}
+}
+
+async function join(c){
+  try{game=JSON.parse(atob(c.trim()));if(!(game.la&&game.lo&&game.r))throw 0}catch(e){show('join');return $('e2').textContent='That code doesn’t look right.'}
+  game.f=flagPos(game);won=false;pos=heading=null;
+  try{if(window.DeviceOrientationEvent&&DeviceOrientationEvent.requestPermission)await DeviceOrientationEvent.requestPermission()}catch(e){}
+  try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});$('vid').srcObject=stream}catch(e){}
+  $('play').style.display='block';$('win').style.display='none';$('dist').textContent='…';$('hint').textContent='Finding you…';t0=Date.now();
+  watch=navigator.geolocation.watchPosition(p=>{pos=p.coords;tick()},e=>$('hint').textContent=locMsg(e),{enableHighAccuracy:true,maximumAge:0,timeout:20000});
+  addEventListener('deviceorientationabsolute',ori,true);addEventListener('deviceorientation',ori,true);
+}
+function ori(e){let h;if(e.webkitCompassHeading!=null)h=e.webkitCompassHeading;else if(e.absolute&&e.alpha!=null)h=(360-e.alpha)%360;else return;
+  heading=(h+((screen.orientation&&screen.orientation.angle)||0))%360;tick()}
+function tick(){
+  if(!pos||won)return;const f=game.f,d=dist(pos.latitude,pos.longitude,f.lat,f.lng),b=bearing(pos.latitude,pos.longitude,f.lat,f.lng);
+  $('dist').textContent=d<1000?Math.round(d)+' m':(d/1000).toFixed(1)+' km';
+  let h=d>150?'Keep walking':d>50?'Getting closer':d>20?'Warm… look around':d>10?'Hot! Almost there':'Tap the flag!';
+  if(pos.accuracy>25)h+=' · weak GPS';
+  const fl=$('flag'),ed=$('edge');fl.style.display=ed.style.display='none';
+  if(heading==null)h+=' · allow motion access for direction';
+  else{const del=((b-heading+540)%360)-180;
+    if(Math.abs(del)<35){fl.style.display='block';fl.style.left=(50+del/70*100)+'%';fl.style.fontSize=Math.max(44,Math.min(150,2400/Math.max(d,16)))+'px'}
+    else{ed.style.display='block';ed.textContent=del>0?'➡️':'⬅️';ed.style.left=del>0?'auto':'14px';ed.style.right=del>0?'14px':'auto'}}
+  $('hint').textContent=h;
+  fl.onclick=()=>{if(d<=Math.max(10,Math.min(pos.accuracy,25))){won=true;const s=Math.floor((Date.now()-t0)/1000);$('wt').textContent='Time: '+Math.floor(s/60)+':'+String(s%60).padStart(2,'0');$('win').style.display='flex';stop()}else $('hint').textContent='Too far — get within 10 m'};
+}
+function stop(){if(watch!=null)navigator.geolocation.clearWatch(watch);watch=null;removeEventListener('deviceorientationabsolute',ori,true);removeEventListener('deviceorientation',ori,true);if(stream)stream.getTracks().forEach(t=>t.stop());stream=null}
+function quit(){stop();$('play').style.display='none';show('home')}
+</script></body></html>
